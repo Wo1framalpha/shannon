@@ -1,51 +1,84 @@
 # Shannon Architecture Deep Dive
+# Shannon 架构深度剖析
 
 ## System Overview
+## 系统概述
 
 Shannon is a production-grade, AI-powered penetration testing framework that combines white-box source code analysis with black-box dynamic exploitation to discover and validate security vulnerabilities in web applications.
 
+<!-- 中文说明：Shannon 是一个生产级的、由 AI 驱动的渗透测试框架，它将白盒源代码分析与黑盒动态漏洞利用相结合，用于发现和验证 Web 应用程序中的安全漏洞。-->
+
 ## High-Level Architecture
+## 高层架构
+
+<!--
+中文说明：Shannon 采用四层架构设计：
+1. 用户界面层 - CLI 命令行工具、Temporal Web UI 和审计日志
+2. 编排层 - 使用 Temporal 进行工作流定义、活动执行和工作池管理
+3. 执行层 - Claude Agent SDK（AI 引擎）、Playwright MCP（浏览器自动化）和 Git 检查点管理器
+4. 工具层 - 外部安全工具（nmap、subfinder、whatweb）和源代码分析
+-->
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                         User Interface                           │
+│                         用户界面层                                │
 │  CLI (shannon script) │ Temporal Web UI │ Audit Logs            │
 └────────────────────────────────┬────────────────────────────────┘
                                  │
 ┌────────────────────────────────▼────────────────────────────────┐
 │                    Orchestration Layer                           │
+│                    编排层                                         │
 │  ┌─────────────┐  ┌──────────────┐  ┌────────────────┐         │
 │  │  Workflow   │  │  Activities  │  │  Worker Pool   │         │
 │  │  Definition │──│  Execution   │──│  (Temporal)    │         │
+│  │  工作流定义  │  │  活动执行     │  │  工作池        │         │
 │  └─────────────┘  └──────────────┘  └────────────────┘         │
 └────────────────────────────────┬────────────────────────────────┘
                                  │
 ┌────────────────────────────────▼────────────────────────────────┐
 │                      Execution Layer                             │
+│                      执行层                                       │
 │  ┌──────────────┐  ┌────────────┐  ┌──────────────────┐        │
 │  │ Claude Agent │  │ Playwright │  │  Git Checkpoint  │        │
 │  │     SDK      │  │    MCP     │  │     Manager      │        │
+│  │  AI 引擎     │  │  浏览器自动化│  │  Git 检查点管理器 │        │
 │  └──────────────┘  └────────────┘  └──────────────────┘        │
 └────────────────────────────────┬────────────────────────────────┘
                                  │
 ┌────────────────────────────────▼────────────────────────────────┐
 │                       Tool Layer                                 │
+│                       工具层                                      │
 │  ┌─────────┐  ┌──────────┐  ┌────────┐  ┌──────────────┐      │
 │  │  nmap   │  │subfinder │  │whatweb │  │ Source Code  │      │
+│  │ 端口扫描 │  │ 子域名发现│  │ Web指纹 │  │  源代码分析   │      │
 │  └─────────┘  └──────────┘  └────────┘  └──────────────┘      │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
 ## Execution Flow
+## 执行流程
 
 ### Complete Pipeline
+### 完整流水线
+
+<!--
+中文说明：Shannon 的执行流程分为 5 个阶段：
+1. 预侦察（Pre-Reconnaissance）- 顺序执行，运行外部工具扫描
+2. 侦察（Reconnaissance）- 顺序执行，分析攻击面
+3. 漏洞分析（Vulnerability Analysis）- 5 个 agent 并行执行
+4. 漏洞利用（Exploitation）- 5 个 agent 并行执行（条件性）
+5. 报告生成（Reporting）- 顺序执行，汇总所有发现
+-->
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │                         SHANNON PIPELINE                          │
+│                         Shannon 流水线                             │
 └──────────────────────────────────────────────────────────────────┘
 
 Phase 1: PRE-RECONNAISSANCE (Sequential)
+阶段 1: 预侦察（顺序执行）
 ┌────────────────────────────────────────────┐
 │  pre-recon agent                           │
 │  - Run external tools (nmap, subfinder)    │
@@ -106,8 +139,25 @@ Phase 5: REPORTING (Sequential)
 ```
 
 ## Temporal Workflow Architecture
+## Temporal 工作流架构
+
+<!--
+中文说明：Temporal 是 Shannon 的核心编排引擎，提供以下关键特性：
+1. 状态机管理 - 跟踪工作流从初始化到完成的整个生命周期
+2. 自动重试机制 - 区分可重试错误（账单、限流）和不可重试错误（认证、配置）
+3. 崩溃恢复 - Worker 进程崩溃后自动恢复工作流状态
+4. 可查询进度 - 实时查询当前执行阶段和完成的 agent
+-->
 
 ### State Machine
+### 状态机
+
+<!--
+中文说明：工作流状态转换：
+- INITIAL（初始）→ RUNNING（运行中）→ COMPLETED（已完成）
+- RUNNING 状态下如果遇到可重试错误，会在 5-30 分钟后自动重试
+- 如果遇到不可恢复的错误，直接转到 FAILED（失败）状态
+-->
 
 ```
 ┌──────────────┐
@@ -796,8 +846,25 @@ Benefits:
 ```
 
 ## Error Handling
+## 错误处理
+
+<!--
+中文说明：Shannon 实现了智能的错误分类和恢复机制：
+1. 可重试错误（Retryable Errors）- 临时性错误，Temporal 会自动重试
+   - BillingError（账单错误）- API 花费上限，等待 5-30 分钟后重试
+   - RateLimitError（限流错误）- 请求过多，使用指数退避算法重试
+   - TransientError（临时错误）- 服务器端问题，自动重试
+   - NetworkError（网络错误）- 连接超时或 DNS 失败
+
+2. 不可重试错误（Non-Retryable Errors）- 永久性错误，工作流立即失败
+   - AuthenticationError（认证错误）- API 密钥无效
+   - PermissionError（权限错误）- 权限不足
+   - ConfigurationError（配置错误）- 配置文件无效
+   - InvalidRequestError（请求错误）- 请求格式错误
+-->
 
 ### Error Classification
+### 错误分类
 
 ```
 ┌────────────────────────────────────────────────────────────┐
@@ -1005,8 +1072,17 @@ PHASE 4: Community & Ecosystem (Ongoing)
 ```
 
 ## Key Takeaways
+## 核心要点
+
+<!--
+中文说明：Shannon 的核心创新和特点总结：
+1. 技术创新 - "No Exploit, No Report"方法论、流水线并行化、白盒+黑盒混合分析
+2. 生产就绪 - 容器化部署、配置管理、错误处理、审计日志、成本和性能指标
+3. 使用场景 - 作为持续的"红队"与开发"蓝队"配合，在每次构建时发现漏洞
+-->
 
 ### Technical Innovation
+### 技术创新
 
 1. **"No Exploit, No Report" Methodology**
    - Only reports vulnerabilities that can be successfully exploited
